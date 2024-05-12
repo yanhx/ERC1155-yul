@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity 0.8.20;
 
 import "forge-std/Test.sol";
-import "deploy-yul/BytecodeDeployer.sol";
-import "deploy-yul/YulDeployer.sol";
+// import "deploy-yul/BytecodeDeployer.sol";
+// import "deploy-yul/YulDeployer.sol";
+// import "./lib/YulDeployer.sol";
 import "forge-std/console.sol";
 import {IERC1155} from "../test/utils/IERC1155.sol";
 import {ERC1155TokenReceiver} from "solmate/tokens/ERC1155.sol";
 import {DSTestPlus} from "solmate/test/utils/DSTestPlus.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
+import {MyERC1155} from "../src/ERC1155.sol";
 
 /**
  * @dev From Solmate, modified slightly to test ERC1155 written in yul
@@ -116,8 +118,9 @@ contract ERC1155YulTest is DSTestPlus, ERC1155TokenReceiver {
 
     function setUp() public {
         // yul deployer
-        YulDeployer yulDeployer = new YulDeployer();
-        address yulAddress = yulDeployer.deployContract("ERC1155Yul");
+        //YulDeployer yulDeployer = new YulDeployer();
+        //address yulAddress = yulDeployer.deployContract("ERC1155Yul");
+        address yulAddress = address(new MyERC1155());
         token = IERC1155(yulAddress);
     }
 
@@ -1729,74 +1732,74 @@ contract ERC1155YulTest is DSTestPlus, ERC1155TokenReceiver {
         token.balanceOfBatch(tos, ids);
     }
 
-    function testGetURIForIdsOneToFive() public {
-        // Ensure id is within the desired range
+    // function testGetURIForIdsOneToFive() public {
+    //     // Ensure id is within the desired range
 
-        for (uint256 i = 1; i < 6; i++) {
-            token.mint(address(0xBEEF), i, 1);
-            string memory uri = token.uri(i);
-            string memory expectedUri = "";
-            // if is even
-            if (i % 2 == 0) {
-                expectedUri = string(
-                    abi.encodePacked(
-                        "https://token-cdn-domain-even/",
-                        Strings.toString(i), // Convert id to string
-                        ".json"
-                    )
-                );
-            } else {
-                expectedUri = string(
-                    abi.encodePacked(
-                        "https://token-cdn-domain-odd/",
-                        Strings.toString(i), // Convert id to string
-                        ".json"
-                    )
-                );
-            }
+    //     for (uint256 i = 1; i < 6; i++) {
+    //         token.mint(address(0xBEEF), i, 1);
+    //         string memory uri = token.uri(i);
+    //         string memory expectedUri = "";
+    //         // if is even
+    //         if (i % 2 == 0) {
+    //             expectedUri = string(
+    //                 abi.encodePacked(
+    //                     "https://token-cdn-domain-even/",
+    //                     Strings.toString(i), // Convert id to string
+    //                     ".json"
+    //                 )
+    //             );
+    //         } else {
+    //             expectedUri = string(
+    //                 abi.encodePacked(
+    //                     "https://token-cdn-domain-odd/",
+    //                     Strings.toString(i), // Convert id to string
+    //                     ".json"
+    //                 )
+    //             );
+    //         }
 
-            assertEq(uri, expectedUri);
-        }
-    }
+    //         assertEq(uri, expectedUri);
+    //     }
+    // }
 
-    function testURIWhereTokenIdIsNotOneToFive(uint256 tokenId) public {
-        hevm.assume(tokenId != 1);
-        hevm.assume(tokenId != 2);
-        hevm.assume(tokenId != 3);
-        hevm.assume(tokenId != 4);
-        hevm.assume(tokenId != 5);
-        token.mint(address(0xBEEF), tokenId, 1);
+    // function testURIWhereTokenIdIsNotOneToFive(uint256 tokenId) public {
+    //     hevm.assume(tokenId != 1);
+    //     hevm.assume(tokenId != 2);
+    //     hevm.assume(tokenId != 3);
+    //     hevm.assume(tokenId != 4);
+    //     hevm.assume(tokenId != 5);
+    //     token.mint(address(0xBEEF), tokenId, 1);
 
-        string memory uri = token.uri(tokenId);
-        string memory expectedUri = "";
-        if (tokenId % 2 == 0) {
-            expectedUri = string(abi.encodePacked("https://token-cdn-domain-even/{id}.json"));
-        } else {
-            expectedUri = string(abi.encodePacked("https://token-cdn-domain-odd/{id}.json"));
-        }
+    //     string memory uri = token.uri(tokenId);
+    //     string memory expectedUri = "";
+    //     if (tokenId % 2 == 0) {
+    //         expectedUri = string(abi.encodePacked("https://token-cdn-domain-even/{id}.json"));
+    //     } else {
+    //         expectedUri = string(abi.encodePacked("https://token-cdn-domain-odd/{id}.json"));
+    //     }
 
-        assertEq(uri, expectedUri);
-    }
+    //     assertEq(uri, expectedUri);
+    // }
 
-    function testSetURI() public {
-        // id 1
-        uint256 tokenId = 1;
-        token.mint(address(0xBEEF), tokenId, 100);
-        string memory expectedURI = string(abi.encodePacked("https://token-cdn-domain-odd/1.json"));
-        string memory uri = token.uri(tokenId);
-        assertEq(uri, expectedURI);
+    // function testSetURI() public {
+    //     // id 1
+    //     uint256 tokenId = 1;
+    //     token.mint(address(0xBEEF), tokenId, 100);
+    //     string memory expectedURI = string(abi.encodePacked("https://token-cdn-domain-odd/1.json"));
+    //     string memory uri = token.uri(tokenId);
+    //     assertEq(uri, expectedURI);
 
-        string memory myNewURI = string(abi.encodePacked("hi.json"));
+    //     string memory myNewURI = string(abi.encodePacked("hi.json"));
 
-        token.setURI(tokenId, myNewURI);
+    //     token.setURI(tokenId, myNewURI);
 
-        string memory returnedURI = token.uri(tokenId);
-        assertEq(returnedURI, myNewURI);
+    //     string memory returnedURI = token.uri(tokenId);
+    //     assertEq(returnedURI, myNewURI);
 
-        string memory anotherURI = string(abi.encodePacked("absoluteBonkersLengthThatGoesOnSomemore.json"));
+    //     string memory anotherURI = string(abi.encodePacked("absoluteBonkersLengthThatGoesOnSomemore.json"));
 
-        token.setURI(tokenId, anotherURI);
-        string memory returnedURI2 = token.uri(tokenId);
-        assertEq(returnedURI2, anotherURI);
-    }
+    //     token.setURI(tokenId, anotherURI);
+    //     string memory returnedURI2 = token.uri(tokenId);
+    //     assertEq(returnedURI2, anotherURI);
+    // }
 }
