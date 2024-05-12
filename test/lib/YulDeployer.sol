@@ -10,7 +10,8 @@ contract YulDeployer is Test {
     ///@return deployedAddress - The address that the contract was deployed to
     function deployContract(string memory fileName) public returns (address) {
         string memory bashCommand = string.concat(
-            'cast abi-encode "f(bytes)" $(solc --strict-assembly yul/', string.concat(fileName, ".yul --bin | tail -1)")
+            'cast abi-encode "f(bytes)" $(solc --evm-version=paris --strict-assembly yul/',
+            string.concat(fileName, ".yul --bin | tail -1)")
         );
 
         console.log(bashCommand);
