@@ -1,29 +1,5 @@
-# Yul developer experience
+# ERC 1155 Implementation in Yul
 
-## Repository installation
+## About the project
 
-1. Install Foundry
-```
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
-```
-
-2. Install solidity compiler
-https://docs.soliditylang.org/en/latest/installing-solidity.html#installing-the-solidity-compiler
-
-3. Build Yul contracts and check tests pass
-```
-forge test
-```
-
-## Running tests
-
-Run tests (compiles yul then fetch resulting bytecode in test)
-```
-forge test
-```
-
-To see the console logs during tests
-```
-forge test -vvv
-```
+Part of the Rareskills course, this project was for us to master Yul and more importantly understand how Solidity works under the hood. Through this we were forced to understand how Solidity handles memory, storage, parameters when a function is called and how values are returned at the end of the execution of a function.

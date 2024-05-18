@@ -10,21 +10,24 @@ object "ERC1155" {
   code {
     // Store the initial URI
 
-    sstore(0, 0x4F)   //39*2 + 1
+    sstore(0, 0x43)   //33*2 + 1
     mstore(0x00, 0)
     // keccak256(v’s slot)
     let initialLocation := keccak256(0x00, 0x20)
     mstore(0x00, 0x00)
 
-    // cast calldata "setURI(string)" 'https://token-erc1155-cdn-domain/0.json'
+    // cast calldata "setURI(string)" 'https://token-erc1155-cdn-domain/'
     // 0000000000000000000000000000000000000000000000000000000000000020
     // 0000000000000000000000000000000000000000000000000000000000000027
     // 68747470733a2f2f746f6b656e2d657263313135352d63646e2d646f6d61696e
-    // 2f302e6a736f6e00000000000000000000000000000000000000000000000000
+    // 2f 
+    // 302e6a736f6e00000000000000000000000000000000000000000000000000
 
     sstore(add(initialLocation, 0x00), 0x68747470733a2f2f746f6b656e2d657263313135352d63646e2d646f6d61696e)
-    sstore(add(initialLocation, 0x01), 0x2f302e6a736f6e00000000000000000000000000000000000000000000000000)
+    sstore(add(initialLocation, 0x01), 0x2f00000000000000000000000000000000000000000000000000000000000000)
 
+    //"0123456789" for string convert
+    //sstore(0x100, 0x3031323334353637383900000000000000000000000000000000000000000000)
     
     // Copy the runtime code to memory and return it
     datacopy(0, dataoffset("Runtime"), datasize("Runtime"))
@@ -581,15 +584,24 @@ object "ERC1155" {
               memptr := add(0x20, memptr)
           }
 
+          let ns, memptrE := toStringBytes(id, add(0x140, stringSize))
+          memptr := memptrE
+          mstore(0x120, add(stringSize, ns))
+
           return(0x100, sub(memptr,0x100))
         }
 
         if iszero(shortFlag) {
+          let stringSizeMod := div(and(stringSize, 0xff),2)
           mstore(0x100, 0x20)
-          mstore(0x120, div(and(stringSize, 0xff),2))
+          mstore(0x120, stringSizeMod)
           let cachedChunk := and(stringSize, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00)
           mstore(0x140, cachedChunk)
-          return(0x100, 0x60)
+
+          let ns, memptrE := toStringBytes(id, add(0x140, stringSizeMod))
+          mstore(0x120, add(stringSizeMod, ns))
+
+          return(0x100, sub(memptrE, 0x100))
         }
       }
 
@@ -613,7 +625,6 @@ object "ERC1155" {
             sstore(dataOffset, uriFragment)
             //log3(0x00, 0x00, i,uriFragment,dataOffset)
             dataOffset := add(dataOffset, 0x1)
-            
           }
           
           calldatacopy(0x00, uriStartPos, sub(calldatasize(), 0x44))
@@ -808,6 +819,30 @@ object "ERC1155" {
 
         /// Copy the data from calldata to memory
         calldatacopy(memPtr, dataLengthOff, totalLength)
+
+      }
+
+      function toStringBytes(value, memptr) -> size, memptrEnd {
+        size := 0
+        let v := value
+
+        for { } v { v := div(v, 10) } {
+          size := add(size, 1)
+        }
+        let ptr := add(memptr, size)
+        memptrEnd := add(ptr, 0x05)
+        let remainder := mod(memptrEnd, 0x20)
+        if remainder {
+          memptrEnd := add(memptrEnd, sub(0x20, remainder))
+        }
+
+        for { } value { value := div(value, 10) } {
+          ptr := sub(ptr, 1)
+          mstore8(ptr, byte(mod(value, 10), 0x3031323334353637383900000000000000000000000000000000000000000000))
+        }
+        // append ".json"
+        mstore(add(memptr, size), 0x2e6a736f6e000000000000000000000000000000000000000000000000000000)
+        size := add(size, 5)
 
       }
 
