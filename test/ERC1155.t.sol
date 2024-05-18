@@ -4,7 +4,7 @@ pragma solidity 0.8.20;
 import "forge-std/Test.sol";
 // import "deploy-yul/BytecodeDeployer.sol";
 // import "deploy-yul/YulDeployer.sol";
-// import "./lib/YulDeployer.sol";
+import "./lib/YulDeployer.sol";
 import "forge-std/console.sol";
 import {IERC1155} from "../test/utils/IERC1155.sol";
 import {ERC1155TokenReceiver} from "solmate/tokens/ERC1155.sol";
@@ -118,9 +118,9 @@ contract ERC1155YulTest is DSTestPlus, ERC1155TokenReceiver {
 
     function setUp() public {
         // yul deployer
-        //YulDeployer yulDeployer = new YulDeployer();
-        //address yulAddress = yulDeployer.deployContract("ERC1155Yul");
-        address yulAddress = address(new MyERC1155());
+        YulDeployer yulDeployer = new YulDeployer();
+        address yulAddress = yulDeployer.deployContract("ERC1155");
+        //address yulAddress = address(new MyERC1155());
         token = IERC1155(yulAddress);
     }
 
@@ -190,13 +190,15 @@ contract ERC1155YulTest is DSTestPlus, ERC1155TokenReceiver {
         amounts[3] = 400;
         amounts[4] = 500;
 
-        token.batchMint(address(to), ids, amounts, "testing 123");
+        token.batchMint(
+            address(to), ids, amounts, "testing 123333333333333333333333333333333333333333333333333333333333"
+        );
 
         assertEq(to.batchOperator(), address(this));
         assertEq(to.batchFrom(), address(0));
         assertUintArrayEq(to.batchIds(), ids);
         assertUintArrayEq(to.batchAmounts(), amounts);
-        assertBytesEq(to.batchData(), "testing 123");
+        assertBytesEq(to.batchData(), "testing 123333333333333333333333333333333333333333333333333333333333");
 
         assertEq(token.balanceOf(address(to), 1337), 100);
         assertEq(token.balanceOf(address(to), 1338), 200);
@@ -276,12 +278,14 @@ contract ERC1155YulTest is DSTestPlus, ERC1155TokenReceiver {
         hevm.prank(from);
         token.setApprovalForAll(address(this), true);
 
-        token.safeTransferFrom(from, address(to), 1337, 70, "testing 123");
+        token.safeTransferFrom(
+            from, address(to), 1337, 70, "testing 12333333333333333333333333333333333333333333333333333333333333333"
+        );
 
         assertEq(to.operator(), address(this));
         assertEq(to.from(), from);
         assertEq(to.id(), 1337);
-        assertBytesEq(to.mintData(), "testing 123");
+        assertBytesEq(to.mintData(), "testing 12333333333333333333333333333333333333333333333333333333333333333");
 
         assertEq(token.balanceOf(address(to), 1337), 70);
         assertEq(token.balanceOf(from, 1337), 30);
@@ -1039,6 +1043,7 @@ contract ERC1155YulTest is DSTestPlus, ERC1155TokenReceiver {
         uint256 transferAmount,
         bytes memory transferData
     ) public {
+        //hevm.assume(transferData.length > 64);
         ERC1155Recipient to = new ERC1155Recipient();
 
         address from = address(0xABCD);

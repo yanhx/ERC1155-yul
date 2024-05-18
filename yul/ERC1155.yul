@@ -23,13 +23,12 @@ object "ERC1155" {
   object "Runtime" {
     // Return the calldata
     code {
-        
       // Ensure no Ether was sent with the call
       require(iszero(callvalue()))
 
       // Load the function selector from calldata
       //let s := div(calldataload(0), 0x100000000000000000000000000000000000000000000000000000000)
-      let s: = shr(0xe0, calldataload(0))
+      let s:= shr(0xe0, calldataload(0))
 
       // Switch statement to handle different function calls
       switch s
@@ -45,13 +44,19 @@ object "ERC1155" {
         
         // mint(address,uint256,uint256)
         case 0x156e29f6 {
-          mint(decodeAsAddress(0), decodeAsUint(1), decodeAsUint(2))
+          mint(decodeAsAddress(0), decodeAsUint(1), decodeAsUint(2), 0)
         }
 
         // mint(address,uint256,uint256,bytes)
-        // TODO: add callback
+        // TODO: add callback - DONE
         case 0x731133e9 {
-          mint(decodeAsAddress(0), decodeAsUint(1), decodeAsUint(2))
+          mint(decodeAsAddress(0), decodeAsUint(1), decodeAsUint(2), decodeAsUint(3))
+        }
+
+        // batchMint(address,uint256[],uint256[],bytes)
+        // TODO:   - DONE
+        case 0xb48ab8b6 {
+          batchMint(decodeAsAddress(0))
         }
         
         // balanceOfBatch(address[],uint256[])
@@ -75,7 +80,7 @@ object "ERC1155" {
         }
         
         // safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)
-        // TODO : add callback
+        // TODO : add callback  -DONE
         case 0x2eb2c2d6 { 
           safeBatchTransferFrom(decodeAsAddress(0), decodeAsAddress(1))
         }
@@ -83,6 +88,18 @@ object "ERC1155" {
         // burn(uint256,uint256)
         case 0xb390c0ab {
           burn(caller(), decodeAsUint(0), decodeAsUint(1))
+        }
+
+        // burn(address from, uint256 id, uint256 amount)
+        // TODO - DONE
+        case 0xf5298aca {
+          burn(decodeAsAddress(0), decodeAsUint(1), decodeAsUint(2))
+        }
+
+        // batchBurn(address from, uint256[] calldata ids, uint256[] calldata amounts)
+        // TODO
+        case 0xf6eb127a {
+          batchBurn(decodeAsAddress(0))
         }
         
         // Revert for unknown function calls
@@ -149,11 +166,12 @@ object "ERC1155" {
         offset := balanceOfStorageOffset(account)
 
         /// Store the balance offset and spender address in memory
-        mstore(0x00, offset)
-        mstore(0x20, spender)
+        mstore(0x00, 0x01)           //to avoid collision with balance storage
+        mstore(0x20, offset)
+        mstore(0x40, spender)
 
         /// Calculate the storage offset for the account's allowance to the spender using keccak256
-        offset := keccak256(0, 0x40)
+        offset := keccak256(0, 0x60)
       }
 
       // ╔══════════════════════════════════════════╗
@@ -189,7 +207,7 @@ object "ERC1155" {
         let idArrayLength := calldataload(add(4, idOffset))
 
         /// Check if the lengths of both arrays match; if not, revert the transaction with a mismatch error
-        if iszero(eq(idArrayLength, addressArrayLength)) { revertWithAccountsAndIdsMismatch() }
+        if iszero(eq(idArrayLength, addressArrayLength)) { revertWithMismatchedLengths() }
 
         /// Set the initial memory offset for storing the result
         let memOffset := 0x40
@@ -217,7 +235,7 @@ object "ERC1155" {
         }
         
         /// Return the memory containing the balances array
-        return (0x40, memOffset)
+        return (0x40, sub(memOffset, 0x40))
       }
 
       /// @dev Function to set or unset approval for an operator
@@ -249,16 +267,18 @@ object "ERC1155" {
       /// @param id The token ID
       /// @param amount The number of tokens to transfer
       /// @param data Additional data to pass to the recipient's onERC1155Received function (if implemented)
-      function safeTransferFrom(from, to, id, amount, data) {
+      function safeTransferFrom(from, to, id, amount, dataOff) {
         /// If the recipient address is the zero address, revert the transaction with a transfer to zero address error
         if iszero(to) {
-          revertWithTransferToZeroAddress()
+            revertWithZeroAddress()
         }
 
         /// Check if the caller is the sender or has approval to transfer on behalf of the sender; if not, revert with a not owner or approved error
         if iszero(or(eq(caller(), from), isApprovedForAll(from, caller()))) { 
           revertWithNotOwnerOrApproved()
         }
+        
+        //let dataStartPos := add(4, dataOff)
 
         /// Calculate the storage locations for the sender's and recipient's balances
         mstore(0x00, balanceOfStorageOffset(from))
@@ -285,7 +305,7 @@ object "ERC1155" {
         emitTransferSingle(caller(), from, to, id, amount)
 
         /// Perform a safe transfer acceptance check
-        doSafeTransferAcceptanceCheck(from, to, id, amount, data)
+        doSafeTransferAcceptanceCheck(from, to, id, amount, dataOff)
       }
 
 
@@ -297,7 +317,7 @@ object "ERC1155" {
         if iszero(or(eq(caller(), from), isApprovedForAll(from, caller()))) { revertWithNotOwnerOrApproved() } 
         
         /// Check if the 'to' address is valid; if not, revert with a transfer to zero address error
-        if iszero(to) { revertWithTransferToZeroAddress() }
+        if iszero(to) { revertWithZeroAddress() }
         
         /// Decode token IDs and amounts from calldata
         let idsOffset := decodeAsUint(2)
@@ -311,7 +331,7 @@ object "ERC1155" {
         let lenIds := calldataload(lenIdsOffset)
 
         /// Check if the lengths of token IDs and amounts arrays are equal; if not, revert with an ids and amounts mismatch error
-        if iszero(eq(lenAmounts, lenIds)) { revertWithIdsAndAmountsMismatch() }
+        if iszero(eq(lenAmounts, lenIds)) { revertWithMismatchedLengths() }
 
         /// Initialize the current offset
         let currentOffset := 0x20
@@ -337,6 +357,7 @@ object "ERC1155" {
 
             /// Check if the 'from' address has enough balance; if not, revert with an insufficient balance error
             if iszero(gte(fromBalance, amount)) {
+              log3(0x0,0x0,fromBalance,amount, id)
               revertWithInsufficientBalance()
             }
 
@@ -349,16 +370,18 @@ object "ERC1155" {
         }
         /// Emit the TransferBatch event
         emitTransferBatch(caller(), from, to, idsOffset, amountsOffset)
+
+        doSafeTransferBatchAcceptanceCheck(from, to, idsOffset, amountsOffset, decodeAsUint(4))
       }
 
       /// @dev Function to mint tokens to an account
       /// @param account The address of the account to mint tokens to
       /// @param id The token ID
       /// @param amount The number of tokens to mint
-      function mint(account, id, amount) {
+      function mint(account, id, amount, dataOff) {
         /// If the account address is the zero address, revert the transaction with a mint to zero address error
         if iszero(account) {
-          revertWithMintToZeroAddress()
+            revertWithZeroAddress()
         }
 
         /// Calculate the storage location for the account's balance
@@ -374,7 +397,64 @@ object "ERC1155" {
         emitTransferSingle(caller(), 0, account, id, amount)
 
         /// Perform a safe transfer acceptance check
-        doSafeTransferAcceptanceCheck(0, account, id, amount, "")
+        if iszero(dataOff) {
+          doSafeTransferAcceptanceCheck(0, account, id, amount, "")
+        }
+        if iszero(iszero(dataOff)) {
+          doSafeTransferAcceptanceCheck(0, account, id, amount, dataOff)
+        }
+      }
+
+      function batchMint(account) {
+        /// If the account address is the zero address, revert the transaction with a mint to zero address error
+        if iszero(account) {
+            revertWithZeroAddress()
+        }
+
+         /// Decode token IDs and amounts from calldata
+         let idsOffset := decodeAsUint(1)
+         let amountsOffset := decodeAsUint(2)
+ 
+         /// Calculate lengths of token IDs and amounts arrays
+         let lenAmountsOffset := add(4, amountsOffset)
+         let lenIdsOffset := add(4, idsOffset)
+ 
+         let lenAmounts := calldataload(lenAmountsOffset)
+         let lenIds := calldataload(lenIdsOffset)
+ 
+         /// Check if the lengths of token IDs and amounts arrays are equal; if not, revert with an ids and amounts mismatch error
+         if iszero(eq(lenAmounts, lenIds)) { revertWithMismatchedLengths() }
+        
+         /// Initialize the current offset
+         let currentOffset := 0x20
+
+        /// Iterate through the token IDs and amounts arrays
+        for { let i := 0 } lt(i, lenIds) { i := add(i, 1) } {
+
+            /// Load the current token ID and amount
+            let id := calldataload(add(lenIdsOffset, currentOffset))
+            let amount := calldataload(add(lenAmountsOffset, currentOffset))
+
+            /// Calculate the storage location for the account's balance
+            mstore(0x00, balanceOfStorageOffset(account))
+            mstore(0x20, id)
+            let loc := keccak256(0x00, 0x40)
+
+            /// Load the account's balance, update it, and store it back
+            let bal := sload(loc)
+            sstore(loc, safeAdd(bal, amount))
+
+            /// Emit the TransferSingle event
+            emitTransferSingle(caller(), 0, account, id, amount)
+
+            /// Perform a safe transfer acceptance check
+            // doSafeTransferAcceptanceCheck(0, account, id, amount, decodeAsUint(3))
+
+            /// Update the current offset
+            currentOffset := add(currentOffset, 0x20)
+        }
+        doSafeTransferBatchAcceptanceCheck(0, account, idsOffset, amountsOffset, decodeAsUint(3))
+
       }
 
       /// @dev Function to burn tokens from an account
@@ -384,7 +464,7 @@ object "ERC1155" {
       function burn(account, id, amount) {
         /// If the account address is the zero address, revert the transaction with a burn from zero address error
         if iszero(account) {
-          revertWithBurnFromZeroAddress()
+            revertWithZeroAddress()
         }
 
         /// Calculate the storage location for the account's balance
@@ -395,7 +475,7 @@ object "ERC1155" {
         /// Load the account's balance and ensure it is greater than or equal to the burn amount; if not, revert with a burn amount exceeds balance error
         let bal := sload(loc)
         if iszero(gte(bal, amount)) {
-          revertWithBurnAmountExceedsBalance()
+            revertWithInsufficientBalance()
         }
 
         /// Update the account's balance and store it back
@@ -424,7 +504,7 @@ object "ERC1155" {
       /// @param id The token ID
       /// @param amount The number of tokens to transfer
       /// @param data Additional data to be passed to the recipient's onERC1155Received function
-      function doSafeTransferAcceptanceCheck(from, to, id, amount, data) {
+      function doSafeTransferAcceptanceCheck(from, to, id, amount, dataOff) {
         /// Check the size of the recipient's code
         let size := extcodesize(to)
 
@@ -432,7 +512,7 @@ object "ERC1155" {
         if gt(size, 0) {
             /// Set the onERC1155Received function selector and error signature
             let selector := 0xf23a6e6100000000000000000000000000000000000000000000000000000000
-            let errorSig := 0x8c379a000000000000000000000000000000000000000000000000000000000
+            let errorSig := 0x08c379a000000000000000000000000000000000000000000000000000000000
 
             /// Prepare calldata for onERC1155Received(operator, from, id, amount, data)
             mstore(0x100, selector)
@@ -440,17 +520,17 @@ object "ERC1155" {
             mstore(0x124, from)
             mstore(0x144, id)
             mstore(0x164, amount)
-            mstore(0x184, 0x1a4)
-            mstore(0x1a4, getDataLength(data))
+            mstore(0x184, 0xa0)
 
             /// Copy data to memory
-            let endPtr := copyDataToMem(0x1c4, data)
+            let len := copyDataToMem(0x1a4, dataOff)
 
             /// Clear the first 32 bytes in memory for storing the call result
             mstore(0x00, 0x00)
 
             /// Perform the call to the recipient's onERC1155Received function
-            let res := call(gas(), to, 0, 0x100, endPtr, 0x00, 0x04)
+            //log2(0x100, tmp, tmp, dataOff)
+            let res := call(gas(), to, 0, 0x100, add(0xa4, len), 0x00, 0x04)
 
             /// If the call result matches the error signature, revert the transaction with the returned error data
             if eq(mload(0x00), errorSig) {
@@ -470,11 +550,49 @@ object "ERC1155" {
         }
       }
 
-      function getDataLength(dataOff) -> dataLength {
-        /// Get the offset of the data length in calldata
-        let dataLengthOff := add(dataOff, 4)
-        /// Load the data length from calldata
-        dataLength := calldataload(dataLengthOff)
+      function doSafeTransferBatchAcceptanceCheck(from, to, idsOffset, amountsOffset, dataOff) {
+        /// Check the size of the recipient's code
+        let size := extcodesize(to)
+
+        /// If the recipient's code size is greater than 0, it means it's a contract
+        if gt(size, 0) {
+            /// Set the onERC1155BatchReceived function selector and error signature
+            let selector := 0xbc197c8100000000000000000000000000000000000000000000000000000000
+            let errorSig := 0x08c379a000000000000000000000000000000000000000000000000000000000
+
+            /// Prepare calldata for onERC1155BatchReceived(operator, from, ids, amounts, data)
+            mstore(0x100, selector)
+            mstore(0x104, caller())
+            mstore(0x124, from)
+            mstore(0x144, add(0x20, idsOffset))
+            mstore(0x164, add(0x20, amountsOffset))
+            mstore(0x184, add(0x20, dataOff))
+
+            calldatacopy(0x1a4, 0x84, sub(calldatasize(), 0x84))
+
+            /// Clear the first 32 bytes in memory for storing the call result
+            mstore(0x00, 0x00)
+
+            /// Perform the call to the recipient's onERC1155Received function
+            //log1(0x100, add(calldatasize(), 0x20), add(calldatasize(), 0x20))
+            let res := call(gas(), to, 0, 0x100, add(calldatasize(), 0x24), 0x00, 0x04)
+
+            /// If the call result matches the error signature, revert the transaction with the returned error data
+            if eq(mload(0x00), errorSig) {
+                returndatacopy(0x00, 0x00, returndatasize())
+                revert(0x00, returndatasize())
+            }
+
+            /// If the call was unsuccessful, revert with a non-ERC1155 receiver error
+            if iszero(res) {
+                revertWithNonERC1155Receiver()
+            }
+
+            /// If the call result doesn't match the onERC1155Received function selector, revert with a rejected tokens error
+            if iszero(eq(mload(0x00), selector)) {
+                revertWithRejectedTokens()
+            }
+        }
       }
 
       // ╔══════════════════════════════════════════╗
@@ -540,14 +658,14 @@ object "ERC1155" {
       /// @dev Function to copy data from calldata to memory
       /// @param memPtr The memory pointer to start writing to
       /// @param dataOff The offset in calldata where the data starts
-      function copyDataToMem(memPtr, dataOff) -> updatedMemPtr {
+      function copyDataToMem(memPtr, dataOff) -> totalLength {
         /// Get the offset of the data length in calldata
         let dataLengthOff := add(dataOff, 4)
         /// Load the data length from calldata
         let dataLength := calldataload(dataLengthOff)
 
         /// Calculate the total length of the data to copy
-        let totalLength := add(0x20, dataLength) // dataLength+data
+        totalLength := add(0x20, dataLength) // dataLength+data
         let remainder := mod(dataLength, 0x20)
         if remainder {
             totalLength := add(totalLength, sub(0x20, remainder))
@@ -556,8 +674,21 @@ object "ERC1155" {
         /// Copy the data from calldata to memory
         calldatacopy(memPtr, dataLengthOff, totalLength)
 
-        /// Update the memory pointer to the next available location
-        updatedMemPtr := add(memPtr, totalLength)
+      }
+
+      function copyUintToMem(memPtr, dataOff) -> totalLength {
+        /// Get the offset of the data length in calldata
+        let dataLengthOff := add(dataOff, 4)
+        /// Load the data length from calldata
+        let dataLength := calldataload(dataLengthOff)
+
+        /// Calculate the total length of the data to copy
+        totalLength := add(0x20, mul(dataLength, 0x20)) // dataLength+data
+
+
+        /// Copy the data from calldata to memory
+        calldatacopy(memPtr, dataLengthOff, totalLength)
+
       }
 
       // ╔══════════════════════════════════════════╗
@@ -581,6 +712,7 @@ object "ERC1155" {
         /// Emit the TransferSingle event using log4 opcode
         log4(0x00, 0x40, signatureHash, operator, from, to)
       }
+
 
       /// @dev Emits a TransferBatch event.
       /// @param operator The address of the operator performing the transfer.
@@ -653,147 +785,93 @@ object "ERC1155" {
       // ╚══════════════════════════════════════════╝
 
       /// Function to revert with a custom message and size
-      /// Reverts with message "ERC1155: address zero is not a valid owner"
+      /// Reverts with message "INVALID_OWNER"
       function revertWithInvalidOwner() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
+        mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
         mstore(0x04, 0x20)
-        mstore(0x24, 42)
-        mstore(0x44, 0x455243313135353a2061646472657373207a65726f206973206e6f7420612076)
-        mstore(0x64, 0x616c6964206f776e657200000000000000000000000000000000000000000000)
+        mstore(0x24, 13)
+        mstore(0x44, "INVALID_OWNER")     //0x494e56414c49445f4f574e455200000000000000000000000000000000000000
         
-        revert(0x00, 0x84)
+        revert(0x00, 0x64)
       }
 
       /// Function to revert with a custom message and size
-      /// Reverts with message "ERC1155: setting approval status for self"
+      /// Reverts with message "SELF_APPROVAL"
       function revertWithSelfApproval() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
+        mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
         mstore(0x04, 0x20)
-        mstore(0x24, 41)
-        mstore(0x44, 0x455243313135353a2073657474696e6720617070726f76616c20737461747573)
-        mstore(0x64, 0x20666f722073656c660000000000000000000000000000000000000000000000)
+        mstore(0x24, 13)
+        mstore(0x44, "SELF_APPROVAL") //0x53454c465f415050524f56414c00000000000000000000000000000000000000
                       
-        revert(0x00, 0x84)
+        revert(0x00, 0x64)
       }
 
       /// Function to revert with a custom message and size
-      /// Reverts with message "ERC1155: accounts and ids length mismatch"
-      function revertWithAccountsAndIdsMismatch() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
-        mstore(0x04, 0x20)
-        mstore(0x24, 41)
-        mstore(0x44, 0x455243313135353a206163636f756e747320616e6420696473206c656e677468)
-        mstore(0x64, 0x206d69736d617463680000000000000000000000000000000000000000000000)
+      /// Reverts with message "LENGTH_MISMATCH"
+      function revertWithMismatchedLengths() {
+        mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000) // Function selector for Error(string)
+        mstore(0x04, 0x20)                                                              // Data offset
+        mstore(0x24, 15)                                                               // String length
+        mstore(0x44, "LENGTH_MISMATCH")                                                 // 0x4c454e4754485f4d49534d415443480000000000000000000000000000000000
                       
-        revert(0x00, 0x84)
+        revert(0x00, 0x64)
       }
         
       /// Function to revert with a custom message and size
-      /// Reverts with message "ERC1155: caller is not token owner or approved"
+      /// Reverts with message "UNAUTHORISED"
       function revertWithNotOwnerOrApproved() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
+        mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
         mstore(0x04, 0x20)
-        mstore(0x24, 46)
-        mstore(0x44, 0x455243313135353a2063616c6c6572206973206e6f7420746f6b656e206f776e)
-        mstore(0x64, 0x6572206f7220617070726f766564000000000000000000000000000000000000)
+        mstore(0x24, 12)
+        mstore(0x44, "UNAUTHORISED") //0x554e415554484f52495345440000000000000000000000000000000000000000
                       
-        revert(0x00, 0x84)
+        revert(0x00, 0x64)
       }
 
       /// @dev Revert with a custom message and size when the balance is insufficient for transfer
-      /// "ERC1155: insufficient balance for transfer"
+      /// "INSUFFICIENT_BAL"
       function revertWithInsufficientBalance() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
+        mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
         mstore(0x04, 0x20)
-        mstore(0x24, 42)
-        mstore(0x44, 0x455243313135353a20696e73756666696369656e742062616c616e636520666f)
-        mstore(0x64, 0x72207472616e7366657200000000000000000000000000000000000000000000)
+        mstore(0x24, 16)
+        mstore(0x44, "INSUFFICIENT_BAL")  //0x494e53554646494349454e545f42414c00000000000000000000000000000000
 
-        revert(0x00, 0x84)
+        revert(0x00, 0x64)
       }
 
-      /// @dev Revert with a custom message and size when ids and amounts length do not match
-      /// "ERC1155: ids and amounts length mismatch"
-      function revertWithIdsAndAmountsMismatch() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
-        mstore(0x04, 0x0000000000000000000000000000000000000000000000000000000000000020)
-        mstore(0x24, 41)
-        mstore(0x44, 0x455243313135353a2069647320616e6420616d6f756e7473206c656e67746820)
-        mstore(0x64, 0x6d69736d61746368000000000000000000000000000000000000000000000000)
-
-        revert(0x00, 0x80)
-      }
       
       /// Function to revert with a custom message and size
-      /// @dev Reverts with message "ERC1155: transfer to the zero address"
-      function revertWithTransferToZeroAddress() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
+      /// @dev Reverts with message "ZERO_ADDRESS"
+      function revertWithZeroAddress() {
+        mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
         mstore(0x04, 0x20)
-        mstore(0x24, 37)
-        mstore(0x44, 0x455243313135353a207472616e7366657220746f20746865207a65726f206164)
-        mstore(0x64, 0x6472657373000000000000000000000000000000000000000000000000000000)
+        mstore(0x24, 12)
+        mstore(0x44, "ZERO_ADDRESS") //0x5a45524f5f414444524553530000000000000000000000000000000000000000
         
-        revert(0x00, 0x84)
+        revert(0x00, 0x64)
       }
 
-      /// Reverts with a custom message when attempting to mint to the zero address.
-      /// Error: "ERC1155: mint to the zero address"
-      function revertWithMintToZeroAddress() {
-          mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)  // Store error signature
-          mstore(0x04, 0x20)  // Store size of error message
-          mstore(0x24, 33)  // Store length of error message
-          mstore(0x44, 0x455243313135353a206d696e7420746f20746865207a65726f20616464726573)  // Store error message as ASCII
-          mstore(0x64, 0x7300000000000000000000000000000000000000000000000000000000000000)  // Add padding to end of error message
-          
-          revert(0x00, 0x84)  // Revert with error signature and message size
-      }
-
-      /// Function to revert with a custom message and size when burning tokens from the zero address.
-      /// Error("ERC1155: burn from the zero address")
-      function revertWithBurnFromZeroAddress() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
-        mstore(0x04, 0x0000000000000000000000000000000000000000000000000000000000000020)
-        mstore(0x24, 35)
-        mstore(0x44, 0x455243313135353a206275726e2066726f6d20746865207a65726f2061646472)
-        mstore(0x64, 0x6573730000000000000000000000000000000000000000000000000000000000)
-        
-        revert(0x00, 0x84)
-      }
-
-      /// Function to revert with a custom message and size when burn amount exceeds balance.
-      /// "ERC1155: burn amount exceeds balance"
-      function revertWithBurnAmountExceedsBalance() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
-        mstore(0x04, 0x0000000000000000000000000000000000000000000000000000000000000020)
-        mstore(0x24, 36)
-        mstore(0x44, 0x455243313135353a206275726e20616d6f756e7420657863656564732062616c)
-        mstore(0x64, 0x616e636500000000000000000000000000000000000000000000000000000000)
-
-        revert(0x00, 0x84)
-      }
 
       /// Function to revert with a custom message and size when ERC1155Receiver rejected tokens.
-      // "ERC1155: ERC1155Receiver rejected tokens"
+      // "REJECTED_TOKEN"
       function revertWithRejectedTokens() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
+        mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
         mstore(0x04, 0x20)
-        mstore(0x24, 40)
-        mstore(0x44, 0x455243313135353a204552433131353552656365697665722072656a65637465)
-        mstore(0x64, 0x6420746f6b656e73000000000000000000000000000000000000000000000000)
+        mstore(0x24, 14)
+        mstore(0x44, "REJECTED_TOKEN") //0x52454a45435445445f544f4b454e000000000000000000000000000000000000
 
-        revert(0x00, 0x84)
+        revert(0x00, 0x64)
       }
 
       /// Function to revert with a custom message and size when transferring tokens to a non-ERC1155Receiver implementer.
-      // "ERC1155: transfer to non-ERC1155Receiver implementer"
+      // "NON_RECEIVER"
       function revertWithNonERC1155Receiver() {
-        mstore(0x00, 0x8c379a000000000000000000000000000000000000000000000000000000000)
+        mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
         mstore(0x04, 0x20)
-        mstore(0x24, 52)
-        mstore(0x44, 0x455243313135353a207472616e7366657220746f206e6f6e2d45524331313535)
-        mstore(0x64, 0x526563656976657220696d706c656d656e746572000000000000000000000000)
+        mstore(0x24, 12)
+        mstore(0x44, "NON_RECEIVER") //0x4e4f4e5f52454345495645520000000000000000000000000000000000000000
                           
-        revert(0x00, 0x84)
+        revert(0x00, 0x64)
       }
     }
   }
