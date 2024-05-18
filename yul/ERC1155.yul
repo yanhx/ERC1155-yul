@@ -9,7 +9,22 @@
 object "ERC1155" {
   code {
     // Store the initial URI
-    sstore(0, "https://ryan.com/")
+
+    sstore(0, 0x4F)   //39*2 + 1
+    mstore(0x00, 0)
+    // keccak256(v’s slot)
+    let initialLocation := keccak256(0x00, 0x20)
+    mstore(0x00, 0x00)
+
+    // cast calldata "setURI(string)" 'https://token-erc1155-cdn-domain/0.json'
+    // 0000000000000000000000000000000000000000000000000000000000000020
+    // 0000000000000000000000000000000000000000000000000000000000000027
+    // 68747470733a2f2f746f6b656e2d657263313135352d63646e2d646f6d61696e
+    // 2f302e6a736f6e00000000000000000000000000000000000000000000000000
+
+    sstore(add(initialLocation, 0x00), 0x68747470733a2f2f746f6b656e2d657263313135352d63646e2d646f6d61696e)
+    sstore(add(initialLocation, 0x01), 0x2f302e6a736f6e00000000000000000000000000000000000000000000000000)
+
     
     // Copy the runtime code to memory and return it
     datacopy(0, dataoffset("Runtime"), datasize("Runtime"))
@@ -36,6 +51,10 @@ object "ERC1155" {
         case 0x0e89341c { // uri(uint256)
           uri(decodeAsUint(0))
         } 
+
+        case 0x862440e2 /* "setURI(uint256, string)" */ {
+          setUri(decodeAsUint(0))
+        }
         
         // balanceOf(address,uint256)
         case 0x00fdd58e {
@@ -97,7 +116,7 @@ object "ERC1155" {
         }
 
         // batchBurn(address from, uint256[] calldata ids, uint256[] calldata amounts)
-        // TODO
+        // TODO - DONE
         case 0xf6eb127a {
           batchBurn(decodeAsAddress(0))
         }
@@ -444,17 +463,13 @@ object "ERC1155" {
             let bal := sload(loc)
             sstore(loc, safeAdd(bal, amount))
 
-            /// Emit the TransferSingle event
-            emitTransferSingle(caller(), 0, account, id, amount)
-
-            /// Perform a safe transfer acceptance check
-            // doSafeTransferAcceptanceCheck(0, account, id, amount, decodeAsUint(3))
-
             /// Update the current offset
             currentOffset := add(currentOffset, 0x20)
         }
-        doSafeTransferBatchAcceptanceCheck(0, account, idsOffset, amountsOffset, decodeAsUint(3))
+        /// Emit the TransferBatch event
+        emitTransferBatch(caller(), 0, account, idsOffset, amountsOffset)
 
+        doSafeTransferBatchAcceptanceCheck(0, account, idsOffset, amountsOffset, decodeAsUint(3))
       }
 
       /// @dev Function to burn tokens from an account
@@ -485,17 +500,137 @@ object "ERC1155" {
         emitTransferSingle(caller(), account, 0, id, amount)
       }
 
-      /// @dev Function to return the token URI
-      /// @param index The token index
-      /// @return The memory address and length containing the token URI
-      function uri(index) {
-        /// Store the length of the URI and the URI itself in memory
-        mstore(0x00, 0x20)
-        mstore(0x20, 0x12)
-        mstore(0x40, sload(uriPos()))
+      function batchBurn(account) {
+        /// If the account address is the zero address, revert the transaction with a burn from zero address error
+        if iszero(account) {
+            revertWithZeroAddress()
+        }
 
-        /// Return the memory containing the token URI
-        return(0x00, 0x60)
+        /// Decode token IDs and amounts from calldata
+        let idsOffset := decodeAsUint(1)
+        let amountsOffset := decodeAsUint(2)
+
+        /// Calculate lengths of token IDs and amounts arrays
+        let lenAmountsOffset := add(4, amountsOffset)
+        let lenIdsOffset := add(4, idsOffset)
+
+        let lenAmounts := calldataload(lenAmountsOffset)
+        let lenIds := calldataload(lenIdsOffset)
+
+        /// Check if the lengths of token IDs and amounts arrays are equal; if not, revert with an ids and amounts mismatch error
+        if iszero(eq(lenAmounts, lenIds)) { revertWithMismatchedLengths() }
+       
+        /// Initialize the current offset
+        let currentOffset := 0x20
+
+        /// Iterate through the token IDs and amounts arrays
+        for { let i := 0 } lt(i, lenIds) { i := add(i, 1) } {
+
+            /// Load the current token ID and amount
+            let id := calldataload(add(lenIdsOffset, currentOffset))
+            let amount := calldataload(add(lenAmountsOffset, currentOffset))
+
+            /// Calculate the storage location for the account's balance
+            mstore(0x00, balanceOfStorageOffset(account))
+            mstore(0x20, id)
+            let loc := keccak256(0x00, 0x40)
+
+            /// Load the account's balance and ensure it is greater than or equal to the burn amount; if not, revert with a burn amount exceeds balance error
+            let bal := sload(loc)
+            if iszero(gte(bal, amount)) {
+                revertWithInsufficientBalance()
+            }
+
+            /// Update the account's balance and store it back
+            sstore(loc, sub(bal, amount))
+
+            /// Update the current offset
+            currentOffset := add(currentOffset, 0x20)
+        }
+        /// Emit the TransferBatch event
+        emitTransferBatch(caller(), account, 0, idsOffset, amountsOffset)
+
+      }
+
+      /// @dev Function to return the token URI
+      /// @param id The token id
+      /// @return The memory address and length containing the token URI
+      function uri(id) {
+
+        let stringSize := sload(uriPos())
+        let shortFlag := and(stringSize, 0x01)   //0->short  1->long
+
+        if shortFlag {
+          stringSize := div(stringSize, 2)
+          mstore(0x100, 0x20)
+          mstore(0x120, stringSize)
+
+          mstore(0x00, uriPos())
+          let location := keccak256(0x00, 0x20)
+          let bound := div(stringSize, 0x20)
+          if mod(stringSize, 0x20) {
+            bound := add(bound, 1)
+          }
+          let memptr := 0x140
+
+          for { let i:= 0 } lt(i, bound) { i:= add(i, 1)}
+          {
+              // keccak256(v’s slot)+ n*(sizeof(T))
+              let cachedChunk := sload(safeAdd(location,i))
+              mstore(memptr, cachedChunk)
+              memptr := add(0x20, memptr)
+          }
+
+          return(0x100, sub(memptr,0x100))
+        }
+
+        if iszero(shortFlag) {
+          mstore(0x100, 0x20)
+          mstore(0x120, div(and(stringSize, 0xff),2))
+          let cachedChunk := and(stringSize, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00)
+          mstore(0x140, cachedChunk)
+          return(0x100, 0x60)
+        }
+      }
+
+      function setUri(id) {
+        let uriStartPos := add(calldataload(0x24), 0x04)
+        let uriLength := calldataload(uriStartPos)
+        //sstore(lengthOffset, uriLength)
+
+        let shortFlag := gt(uriLength, 0x1f)   //0->short 1->long
+        if shortFlag {
+          
+          sstore(uriPos(), add(mul(uriLength, 2), 0x01))    // len*2 +1
+          mstore(0x00, uriPos()) 
+          let dataOffset := keccak256(0x00, 0x20)
+
+          let pos := uriStartPos
+          let uriFragment
+          for { let i := 0 } lt(i, sub(calldatasize(), 0x64)) { i := add(i, 0x20) } {
+            pos := add(pos, 0x20)
+            uriFragment := calldataload(pos)
+            sstore(dataOffset, uriFragment)
+            //log3(0x00, 0x00, i,uriFragment,dataOffset)
+            dataOffset := add(dataOffset, 0x1)
+            
+          }
+          
+          calldatacopy(0x00, uriStartPos, sub(calldatasize(), 0x44))
+          //log2(0x00, sub(calldatasize(), 0x44),uriLength,shortFlag)
+          emitURI(sub(calldatasize(), 0x44), id)
+          return(0x00, 0x00)
+        }
+        if iszero(shortFlag) {
+          let uriFragment := calldataload(add(uriStartPos, 0x20))
+          uriFragment := add(uriFragment, mul(uriLength, 2))
+          sstore(uriPos(), uriFragment)
+
+          calldatacopy(0x00, uriStartPos, sub(calldatasize(), 0x44))
+          //log2(0x00, sub(calldatasize(), 0x44),uriLength,shortFlag)
+          emitURI(sub(calldatasize(), 0x44), id)
+          return(0x00, 0x00)
+        }
       }
 
       /// @dev Function to do a safe transfer acceptance check
@@ -676,21 +811,6 @@ object "ERC1155" {
 
       }
 
-      function copyUintToMem(memPtr, dataOff) -> totalLength {
-        /// Get the offset of the data length in calldata
-        let dataLengthOff := add(dataOff, 4)
-        /// Load the data length from calldata
-        let dataLength := calldataload(dataLengthOff)
-
-        /// Calculate the total length of the data to copy
-        totalLength := add(0x20, mul(dataLength, 0x20)) // dataLength+data
-
-
-        /// Copy the data from calldata to memory
-        calldatacopy(memPtr, dataLengthOff, totalLength)
-
-      }
-
       // ╔══════════════════════════════════════════╗
       // ║            Events Functions              ║
       // ╚══════════════════════════════════════════╝
@@ -723,8 +843,6 @@ object "ERC1155" {
       function emitTransferBatch(operator, from, to, ids, amounts) {
         // The hash of the TransferBatch signature for the ERC1155 standard
         let signatureHash := 0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb
-
-        // Calculate lengths of token IDs and amounts arrays
 
         // Calculate lengths of token IDs and amounts arrays
         let lenIdsOffset := add(4, ids)
@@ -768,15 +886,12 @@ object "ERC1155" {
       /// @dev Emits an URI event.
       /// @param value The URI value to emit.
       /// @param id The token ID associated with the URI.
-      function emitURI(value, id) {
+      function emitURI(dataEnd, id) {
         // The hash of the URI signature for the ERC1155 standard
         let signatureHash := 0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31
 
-        // Copy the URI value to memory
-        mstore(0x00, value)
-
         // Emit URI event
-        log2(0x00, 0x20, signatureHash, id)
+        log2(0x00, dataEnd, signatureHash, id)
       }
 
 

@@ -1767,6 +1767,47 @@ contract ERC1155YulTest is DSTestPlus, ERC1155TokenReceiver {
     //     }
     // }
 
+    function testGetURIForIdsSame() public {
+        // Ensure id is within the desired range
+
+        for (uint256 i = 1; i < 6; i++) {
+            token.mint(address(0xBEEF), i, 1);
+            string memory uri = token.uri(i);
+            string memory expectedUri = "";
+            expectedUri = string(abi.encodePacked("https://token-erc1155-cdn-domain/0.json"));
+
+            assertEq(uri, expectedUri);
+        }
+    }
+
+    function testSetURIForIdsSameLong() public {
+        // Ensure id is within the desired range
+
+        token.setURI(0, "https://token-erc1155-cdn-domain_changed/0.json");
+        for (uint256 i = 1; i < 6; i++) {
+            token.mint(address(0xBEEF), i, 1);
+            string memory uri = token.uri(i);
+            string memory expectedUri = "";
+            expectedUri = string(abi.encodePacked("https://token-erc1155-cdn-domain_changed/0.json"));
+
+            assertEq(uri, expectedUri);
+        }
+    }
+
+    function testSetURIForIdsSameShort() public {
+        // Ensure id is within the desired range
+
+        token.setURI(0, "ryan");
+        for (uint256 i = 1; i < 6; i++) {
+            token.mint(address(0xBEEF), i, 1);
+            string memory uri = token.uri(i);
+            string memory expectedUri = "";
+            expectedUri = string(abi.encodePacked("ryan"));
+
+            assertEq(uri, expectedUri);
+        }
+    }
+
     // function testURIWhereTokenIdIsNotOneToFive(uint256 tokenId) public {
     //     hevm.assume(tokenId != 1);
     //     hevm.assume(tokenId != 2);
